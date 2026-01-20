@@ -28,10 +28,71 @@ See [doc/implementation_plan/](doc/implementation_plan/) for:
 
 ## Quick Start
 
+### Direct Installation (A311D2 Yocto Linux)
+
 ```bash
-# On target device
-systemctl start streambox-settings
+# On target device, navigate to project directory
+cd /path/to/cockpit-streambox-settings
+
+# Run installation script
+sudo ./install.sh
+
 # Access via Cockpit at https://<device-ip>:9090
+```
+
+### Troubleshooting D-Bus Connection
+
+If you see "Failed to connect to D-Bus service" errors:
+
+```bash
+# Run diagnostic script
+sudo ./diagnose-dbus.sh
+
+# Check service logs
+journalctl -u streambox-settings.service -f
+
+# Verify D-Bus registration
+busctl --system list | grep Streambox
+
+# Check if Python dependencies are installed
+opkg list-installed | grep python3
+```
+
+### Required Python Dependencies
+
+Ensure these packages are installed:
+
+```bash
+opkg install python3-dbus python3-pygobject python3-asyncio python3-glib
+```
+
+### Yocto Build
+
+```bash
+# Add recipe to your Yocto layer
+bitbake cockpit-streambox-settings
+
+# Install package on target
+opkg install cockpit-streambox-settings
+```
+
+### Manual Installation
+
+```bash
+# Install backend
+mkdir -p /usr/lib/streambox-settings
+cp backend/*.py /usr/lib/streambox-settings/
+chmod +x /usr/lib/streambox-settings/main.py
+
+# Install frontend
+mkdir -p /usr/share/cockpit/streambox-settings
+cp frontend/* /usr/share/cockpit/streambox-settings/
+
+# Install service
+cp yocto/files/streambox-settings.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable streambox-settings
+systemctl start streambox-settings
 ```
 
 ## Requirements

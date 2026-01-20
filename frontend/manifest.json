@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "requires": {
+    "cockpit": "220"
+  },
+  "menu": {
+    "streambox-settings": {
+      "label": "Streambox Settings",
+      "path": "index.html",
+      "order": 100
+    }
+  }
+}

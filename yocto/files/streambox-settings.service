@@ -1,0 +1,17 @@
+[Unit]
+Description=Streambox Settings Daemon
+After=dbus.service network.target
+Wants=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.cockpit.StreamboxSettings
+Environment=DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/dbus/system_bus_socket
+ExecStart=/usr/lib/streambox-settings/main.py
+Restart=always
+RestartSec=5
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

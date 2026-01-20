@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Streambox Settings</title>
+  <script src="../base1/cockpit.js"></script>
+  <link rel="stylesheet" href="streambox-settings.css">
+</head>
+
+<body>
+  <div id="app">
+    <header class="sbs-header">
+      <h1 class="sbs-title">Streambox Settings</h1>
+    </header>
+
+    <div class="sbs-tabs" id="tabs">
+      <ul class="sbs-tabs-list">
+        <li class="sbs-tabs-item">
+          <button class="sbs-tabs-link sbs-active" data-tab="basic">
+            Basic Settings
+          </button>
+        </li>
+        <li class="sbs-tabs-item">
+          <button class="sbs-tabs-link" data-tab="network">
+            Network Settings
+          </button>
+        </li>
+        <li class="sbs-tabs-item">
+          <button class="sbs-tabs-link" data-tab="tvserver">
+            HDMI Loopout
+          </button>
+        </li>
+        <li class="sbs-tabs-item">
+          <button class="sbs-tabs-link" data-tab="storage">
+            Storage Settings
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <div id="content">
+      <div id="basic-tab" class="tab-content sbs-active">
+        <div class="sbs-card">
+          <div class="sbs-card-header">
+            <h2>Basic Settings</h2>
+          </div>
+          <div class="sbs-card-body">
+            <div class="sbs-form-group">
+              <label for="hostname" class="sbs-label">Device Name</label>
+              <input type="text" id="hostname" class="sbs-input" placeholder="streambox">
+              <button id="set-hostname" class="sbs-button sbs-button-primary">Apply</button>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="timezone" class="sbs-label">Timezone</label>
+              <select id="timezone" class="sbs-select">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="locale" class="sbs-label">System Locale</label>
+              <select id="locale" class="sbs-select">
+                <option value="">Loading...</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="ntp-server" class="sbs-label">NTP Server</label>
+              <input type="text" id="ntp-server" class="sbs-input" placeholder="pool.ntp.org">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="network-tab" class="tab-content">
+        <!-- Network Status -->
+        <div class="sbs-card">
+          <div class="sbs-card-header">
+            <h2>Network Status</h2>
+          </div>
+          <div class="sbs-card-body">
+            <div id="network-status">
+              <p class="sbs-loading">Loading network status...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Wired Network - Collapsible -->
+        <div class="sbs-card sbs-collapsible">
+          <div class="sbs-card-header sbs-collapsible-header" data-target="wired-panel">
+            <h2>Wired Network (eth0)</h2>
+            <span class="sbs-collapse-icon">▼</span>
+          </div>
+          <div id="wired-panel" class="sbs-card-body sbs-collapsible-content">
+            <div class="sbs-form-group">
+              <label for="wired-method" class="sbs-label">Connection Method</label>
+              <select id="wired-method" class="sbs-select">
+                <option value="dhcp">DHCP (Automatic)</option>
+                <option value="static">Static IP</option>
+              </select>
+            </div>
+
+            <div id="wired-static-fields" style="display: none;">
+              <div class="sbs-form-group">
+                <label for="wired-ip" class="sbs-label">IP Address</label>
+                <input type="text" id="wired-ip" class="sbs-input" placeholder="192.168.1.100">
+              </div>
+              <div class="sbs-form-group">
+                <label for="wired-netmask" class="sbs-label">Netmask</label>
+                <input type="text" id="wired-netmask" class="sbs-input" placeholder="255.255.255.0"
+                  value="255.255.255.0">
+              </div>
+              <div class="sbs-form-group">
+                <label for="wired-gateway" class="sbs-label">Gateway</label>
+                <input type="text" id="wired-gateway" class="sbs-input" placeholder="192.168.1.1">
+              </div>
+              <div class="sbs-form-group">
+                <label for="wired-dns" class="sbs-label">DNS Servers</label>
+                <input type="text" id="wired-dns" class="sbs-input" placeholder="8.8.8.8, 8.8.4.4">
+              </div>
+            </div>
+
+            <div class="sbs-form-group">
+              <button id="save-wired-config" class="sbs-button sbs-button-primary">Save Configuration</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- WiFi Client - Collapsible -->
+        <div class="sbs-card sbs-collapsible">
+          <div class="sbs-card-header sbs-collapsible-header" data-target="wifi-panel">
+            <h2>WiFi Client</h2>
+            <span class="sbs-collapse-icon">▼</span>
+          </div>
+          <div id="wifi-panel" class="sbs-card-body sbs-collapsible-content">
+            <div class="sbs-form-group">
+              <button id="scan-wifi" class="sbs-button sbs-button-primary">Scan Networks</button>
+            </div>
+
+            <div id="wifi-networks" class="sbs-network-list">
+              <p>Click Scan to find available networks</p>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="wifi-ssid" class="sbs-label">Network</label>
+              <select id="wifi-ssid" class="sbs-select">
+                <option value="">Select network...</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="wifi-ssid-manual" class="sbs-label">Or Enter Hidden Network</label>
+              <input type="text" id="wifi-ssid-manual" class="sbs-input" placeholder="Hidden network SSID">
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="wifi-password" class="sbs-label">Password</label>
+              <input type="password" id="wifi-password" class="sbs-input" placeholder="WiFi password">
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="wifi-method" class="sbs-label">IP Configuration</label>
+              <select id="wifi-method" class="sbs-select">
+                <option value="dhcp">DHCP (Automatic)</option>
+                <option value="static">Static IP</option>
+              </select>
+            </div>
+
+            <div id="wifi-static-fields" style="display: none;">
+              <div class="sbs-form-group">
+                <label for="wifi-ip" class="sbs-label">IP Address</label>
+                <input type="text" id="wifi-ip" class="sbs-input" placeholder="192.168.1.100">
+              </div>
+              <div class="sbs-form-group">
+                <label for="wifi-netmask" class="sbs-label">Netmask</label>
+                <input type="text" id="wifi-netmask" class="sbs-input" placeholder="255.255.255.0"
+                  value="255.255.255.0">
+              </div>
+              <div class="sbs-form-group">
+                <label for="wifi-gateway" class="sbs-label">Gateway</label>
+                <input type="text" id="wifi-gateway" class="sbs-input" placeholder="192.168.1.1">
+              </div>
+            </div>
+
+            <div class="sbs-form-group">
+              <button id="connect-wifi" class="sbs-button sbs-button-primary">Connect</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- WiFi Access Point - Collapsible -->
+        <div class="sbs-card sbs-collapsible">
+          <div class="sbs-card-header sbs-collapsible-header" data-target="ap-panel">
+            <h2>WiFi Access Point</h2>
+            <span class="sbs-collapse-icon">▼</span>
+          </div>
+          <div id="ap-panel" class="sbs-card-body sbs-collapsible-content">
+            <div class="sbs-form-group">
+              <label for="ap-enabled" class="sbs-label">Enable AP Mode</label>
+              <label class="sbs-toggle">
+                <input type="checkbox" id="ap-enabled">
+                <span class="sbs-toggle-slider"></span>
+              </label>
+            </div>
+
+            <div id="ap-config-fields" style="display: none;">
+              <div class="sbs-form-group">
+                <label for="ap-ssid" class="sbs-label">SSID</label>
+                <input type="text" id="ap-ssid" class="sbs-input" placeholder="StreamBox-AP">
+              </div>
+              <div class="sbs-form-group">
+                <label for="ap-password" class="sbs-label">Password</label>
+                <input type="password" id="ap-password" class="sbs-input" placeholder="Min 8 characters">
+              </div>
+              <div class="sbs-form-group">
+                <label for="ap-channel" class="sbs-label">Channel</label>
+                <select id="ap-channel" class="sbs-select">
+                  <option value="1">1</option>
+                  <option value="6" selected>6</option>
+                  <option value="11">11</option>
+                </select>
+              </div>
+              <div class="sbs-form-group">
+                <label for="ap-ip" class="sbs-label">AP IP Address</label>
+                <input type="text" id="ap-ip" class="sbs-input" placeholder="192.168.4.1" value="192.168.4.1">
+              </div>
+            </div>
+
+            <div class="sbs-form-group">
+              <button id="save-ap-config" class="sbs-button sbs-button-primary">Save AP Configuration</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tvserver-tab" class="tab-content">
+        <div class="sbs-card">
+          <div class="sbs-card-header">
+            <h2>HDMI Loopout Settings</h2>
+          </div>
+          <div class="sbs-card-body">
+            <!-- Video Settings -->
+            <h3 class="sbs-section-title">Video</h3>
+
+            <div class="sbs-form-group">
+              <label for="hdmi-source" class="sbs-label">HDMI Input Source</label>
+              <select id="hdmi-source" class="sbs-select">
+                <option value="HDMI1">HDMI 1</option>
+                <option value="HDMI2" selected>HDMI 2</option>
+                <option value="HDMI3">HDMI 3</option>
+                <option value="HDMI4">HDMI 4</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="hdmi-game-mode" class="sbs-label">Game Mode</label>
+              <select id="hdmi-game-mode" class="sbs-select">
+                <option value="0">0 - Disabled</option>
+                <option value="1">1 - Low Latency (No VRR)</option>
+                <option value="2" selected>2 - Low Latency + VRR</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="hdmi-vrr-mode" class="sbs-label">VRR Mode</label>
+              <select id="hdmi-vrr-mode" class="sbs-select">
+                <option value="0">0 - Force VRR</option>
+                <option value="1">1 - VRR On (EDID)</option>
+                <option value="2" selected>2 - Auto</option>
+              </select>
+            </div>
+
+            <!-- Audio Settings -->
+            <h3 class="sbs-section-title">Audio</h3>
+
+            <div class="sbs-form-group">
+              <label for="audio-enabled" class="sbs-label">Enable Audio Passthrough</label>
+              <label class="sbs-toggle">
+                <input type="checkbox" id="audio-enabled" checked>
+                <span class="sbs-toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="audio-capture" class="sbs-label">Audio Capture Device (Input)</label>
+              <select id="audio-capture" class="sbs-select">
+                <option value="hw:0,2">hw:0,2 - Default</option>
+              </select>
+              <input type="text" id="audio-capture-custom" class="sbs-input" placeholder="e.g. hw:0,2"
+                style="display: none; margin-top: 8px;">
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="audio-playback" class="sbs-label">Audio Playback Device (Output)</label>
+              <select id="audio-playback" class="sbs-select">
+                <option value="hw:0,0">hw:0,0 - Default</option>
+              </select>
+              <input type="text" id="audio-playback-custom" class="sbs-input" placeholder="e.g. hw:0,0"
+                style="display: none; margin-top: 8px;">
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="audio-latency" class="sbs-label">Audio Latency (µs)</label>
+              <input type="number" id="audio-latency" class="sbs-input" value="10000" min="1000" max="100000"
+                step="1000">
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="audio-channels" class="sbs-label">Audio Channels</label>
+              <select id="audio-channels" class="sbs-select">
+                <option value="2" selected>2 (Stereo)</option>
+                <option value="6">6 (5.1 Surround)</option>
+                <option value="8">8 (7.1 Surround)</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <label for="audio-sample-rate" class="sbs-label">Audio Sample Rate</label>
+              <select id="audio-sample-rate" class="sbs-select">
+                <option value="44100">44.1 kHz</option>
+                <option value="48000" selected>48 kHz</option>
+                <option value="96000">96 kHz</option>
+              </select>
+            </div>
+
+            <div class="sbs-form-group">
+              <button id="save-hdmi-config" class="sbs-button sbs-button-primary">Save & Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="storage-tab" class="tab-content">
+        <div class="sbs-card">
+          <div class="sbs-card-header">
+            <h2>Storage Settings</h2>
+            <button id="refresh-storage" class="sbs-button sbs-button-secondary" style="float: right;">Refresh</button>
+          </div>
+          <div class="sbs-card-body">
+            <div id="storage-loading" class="sbs-loading">Loading storage information...</div>
+            <div id="storage-devices-container" style="display: none;">
+              <table class="sbs-table" id="storage-table">
+                <thead>
+                  <tr>
+                    <th>Device</th>
+                    <th>Mount Point</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Used</th>
+                    <th>Available</th>
+                    <th>Usage</th>
+                  </tr>
+                </thead>
+                <tbody id="storage-devices">
+                </tbody>
+              </table>
+            </div>
+            <div id="storage-error" class="sbs-error" style="display: none;"></div>
+          </div>
+        </div>
+
+        <div class="sbs-card" style="margin-top: 20px;">
+          <div class="sbs-card-header">
+            <h2>USB Devices</h2>
+          </div>
+          <div class="sbs-card-body">
+            <div id="usb-devices-container">
+              <table class="sbs-table" id="usb-table">
+                <thead>
+                  <tr>
+                    <th>Device</th>
+                    <th>Label</th>
+                    <th>Mount Point</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="usb-devices">
+                </tbody>
+              </table>
+              <p id="no-usb-message" style="display: none; color: #666;">No USB storage devices detected.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="notification" class="sbs-notification sbs-hidden">
+      <div class="sbs-notification-content">
+        <span id="notification-message"></span>
+        <button class="sbs-button-close" id="close-notification">X</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="streambox-settings.js"></script>
+  <script src="basic-settings.js"></script>
+  <script src="network-settings.js"></script>
+  <script src="hdmi-settings.js"></script>
+  <script src="storage-settings.js"></script>
+</body>
+
+</html>
