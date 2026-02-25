@@ -414,6 +414,38 @@ class StreamboxSettingsInterface(dbus.service.Object):
             logger.error(f"SetWifiApConfig error: {e}")
             raise DBusError("OperationFailed", str(e))
 
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="s"
+    )
+    def GetWifiClientConfig(self, interface: str) -> str:
+        """Get WiFi client configuration as JSON."""
+        try:
+            config = self._loop.run_until_complete(
+                self.network_manager.get_wifi_client_config(interface or "wlan0")
+            )
+            return json.dumps(config)
+        except Exception as e:
+            logger.error(f"GetWifiClientConfig error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="b"
+    )
+    def DisconnectWifi(self, interface: str) -> bool:
+        """Disconnect from WiFi network."""
+        try:
+            success = self._loop.run_until_complete(
+                self.network_manager.disconnect_wifi(interface or "wlan0")
+            )
+            if success:
+                self.NetworkConfigChanged()
+            return success
+        except Exception as e:
+            logger.error(f"DisconnectWifi error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
     # ==================== HDMI Loopout Settings ====================
 
     HDMI_CONFIG_PATH = "/etc/streambox-tv/config.json"

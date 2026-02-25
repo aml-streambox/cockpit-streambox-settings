@@ -13,6 +13,7 @@ const NetworkSettings = {
         console.log("Initializing Network Settings");
         this.loadNetworkStatus();
         this.loadWiredConfig();
+        this.loadWifiClientConfig();
         this.loadWifiApConfig();
         this.setupEventListeners();
         this.setupCollapsiblePanels();
@@ -342,6 +343,110 @@ const NetworkSettings = {
                 connectBtn.textContent = "Connect";
                 console.error("Failed to connect WiFi:", error);
                 showNotification("error", "Connection failed: " + error.message);
+            });
+    },
+
+    loadWifiClientConfig: function () {
+        callDBus("GetWifiClientConfig", ["wlan0"])
+            .done(function (result) {
+                var config = typeof result === 'string' ? JSON.parse(result) : result;
+                if (Array.isArray(config)) {
+                    config = typeof config[0] === 'string' ? JSON.parse(config[0]) : config[0];
+                }
+                NetworkSettings.populateWifiForm(config);
+                console.log("WiFi client config loaded:", config);
+            })
+            .fail(function (error) {
+                console.error("Failed to load WiFi client config:", error);
+            });
+    },
+
+    populateWifiForm: function (config) {
+        // Update the WiFi form with current configuration
+        var ssidSelect = document.getElementById("wifi-ssid");
+        var ssidManualInput = document.getElementById("wifi-ssid-manual");
+        
+        if (config.ssid) {
+            // If SSID is in the dropdown, select it, otherwise put it in manual input
+            if (ssidSelect) {
+                var optionExists = false;
+                for (var i = 0; i < ssidSelect.options.length; i++) {
+                    if (ssidSelect.options[i].value === config.ssid) {
+                        optionExists = true;
+                        break;
+                    }
+                }
+                if (optionExists) {
+                    ssidSelect.value = config.ssid;
+                } else if (ssidManualInput) {
+                    ssidManualInput.value = config.ssid;
+                }
+            }
+        }
+        
+        // Show connection status
+        this.updateWifiConnectionStatus(config);
+    },
+
+    updateWifiConnectionStatus: function (config) {
+        var statusContainer = document.getElementById("wifi-connection-status");
+        var connectBtn = document.getElementById("connect-wifi");
+        
+        if (!statusContainer) {
+            // Create status container if it doesn't exist
+            var formGroup = document.getElementById("connect-wifi").parentElement;
+            statusContainer = document.createElement("div");
+            statusContainer.id = "wifi-connection-status";
+            statusContainer.className = "sbs-wifi-status";
+            formGroup.insertBefore(statusContainer, connectBtn);
+        }
+        
+        if (config.enabled && config.ssid) {
+            statusContainer.innerHTML = '<span class="sbs-status-up"> Connected to: ' + 
+                config.ssid + '</span> <button id="disconnect-wifi" class="sbs-button sbs-button-secondary">Disconnect</button>';
+            statusContainer.style.display = "block";
+            
+            // Add disconnect handler
+            var disconnectBtn = document.getElementById("disconnect-wifi");
+            if (disconnectBtn) {
+                disconnectBtn.addEventListener("click", function () {
+                    NetworkSettings.disconnectWifi();
+                });
+            }
+        } else {
+            statusContainer.innerHTML = '<span class="sbs-status-down">Not connected</span>';
+            statusContainer.style.display = "block";
+        }
+    },
+
+    disconnectWifi: function () {
+        var disconnectBtn = document.getElementById("disconnect-wifi");
+        if (disconnectBtn) {
+            disconnectBtn.disabled = true;
+            disconnectBtn.textContent = "Disconnecting...";
+        }
+        
+        callDBus("DisconnectWifi", ["wlan0"])
+            .done(function (success) {
+                if (success) {
+                    showNotification("success", "WiFi disconnected");
+                    NetworkSettings.loadWifiClientConfig();
+                    NetworkSettings.loadNetworkStatus();
+                } else {
+                    showNotification("error", "Failed to disconnect WiFi");
+                    if (disconnectBtn) {
+                        disconnectBtn.disabled = false;
+                        disconnectBtn.textContent = "Disconnect";
+                    }
+                }
+            })
+            .fail(function (error) {
+                console.error("Failed to disconnect WiFi:", error);
+                showNotification("error", "Disconnect failed: " + error.message);
+                if (disconnectBtn) {
+                    disconnectBtn.disabled = false;
+                    disconnectBtn.textContent = "Disconnect";
+                }
             });
     },
 

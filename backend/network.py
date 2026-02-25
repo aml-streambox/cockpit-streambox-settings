@@ -321,35 +321,106 @@ class NetworkManager:
                            method: str = "dhcp", ip_config: Dict[str, Any] = None) -> bool:
         """Connect to a WiFi network using wpa_supplicant."""
         try:
-            # Create wpa_supplicant config
-            wpa_config = f'''
+            # Save to /etc/wpa_supplicant.conf directly
+            config_path = "/etc/wpa_supplicant.conf"
+            
+            # Create wpa_supplicant config using wpa_passphrase
+            if password:
+                # WPA/WPA2 network - use wpa_passphrase to generate proper config
+                success, wpa_config = self._run_command(
+                    ["wpa_passphrase", ssid, password]
+                )
+                if not success:
+                    logger.error(f"wpa_passphrase failed for SSID: {ssid}")
+                    return False
+                
+                # Add control interface settings to the config (without GROUP to avoid permission issues)
+                full_config = f"""ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+country=US
+
+{wpa_config}
+"""
+            else:
+                # Open network (no password)
+                full_config = f'''ctrl_interface=/var/run/wpa_supplicant
+update_config=1
+country=US
+
 network={{
     ssid="{ssid}"
-    psk="{password}"
-    key_mgmt=WPA-PSK
+    key_mgmt=NONE
 }}
 '''
-            config_path = "/tmp/wpa_supplicant.conf"
+            
             with open(config_path, "w") as f:
-                f.write(wpa_config)
+                f.write(full_config)
             
-            # Stop any existing wpa_supplicant
-            self._run_command(["killall", "wpa_supplicant"])
+            # Set proper permissions
+            self._run_command(["chmod", "600", config_path])
             
-            # Start wpa_supplicant
-            success, _ = self._run_command([
+            logger.info(f"Saved WiFi config to {config_path}")
+            
+            # Clean up any existing wpa_supplicant processes and sockets
+            self._run_command(["pkill", "-9", "-f", f"wpa_supplicant.*{interface}"])
+            await asyncio.sleep(1)
+            
+            # Remove stale control interface socket
+            self._run_command(["rm", "-rf", f"/var/run/wpa_supplicant/{interface}"])
+            self._run_command(["rm", "-rf", f"/var/run/wpa_supplicant/wlan*"])
+            
+            # Bring interface down and up to reset
+            self._run_command(["ip", "link", "set", interface, "down"])
+            await asyncio.sleep(1)
+            self._run_command(["ip", "link", "set", interface, "up"])
+            await asyncio.sleep(1)
+            
+            # Start wpa_supplicant with the persistent config (without GROUP=netdev to avoid issues)
+            success, output = self._run_command([
                 "wpa_supplicant", "-B", "-i", interface,
-                "-c", config_path, "-D", "nl80211,wext"
+                "-c", config_path, "-D", "nl80211,wext",
+                "-C", "/var/run/wpa_supplicant"
             ])
             
             if not success:
+                logger.error(f"Failed to start wpa_supplicant: {output}")
                 return False
             
-            await asyncio.sleep(2)
+            logger.info(f"Started wpa_supplicant for {interface}")
             
+            # Wait for authentication (up to 10 seconds)
+            auth_success = False
+            for i in range(10):
+                await asyncio.sleep(1)
+                
+                # Check if wpa_supplicant is running
+                success, _ = self._run_command(["pgrep", "-f", f"wpa_supplicant.*{interface}"])
+                if not success:
+                    logger.error("wpa_supplicant stopped unexpectedly")
+                    return False
+                
+                # Check connection status
+                status_success, status_output = self._run_command(
+                    ["wpa_cli", "-i", interface, "status"]
+                )
+                if status_success and "wpa_state=COMPLETED" in status_output:
+                    auth_success = True
+                    logger.info("WiFi authentication completed successfully")
+                    break
+            
+            if not auth_success:
+                logger.error("WiFi authentication timed out or failed")
+                return False
+            
+            # Get IP address
             if method == "dhcp":
-                # Get IP via DHCP
-                success, _ = self._run_command(["dhcpcd", interface])
+                # Flush existing IP and get new one via DHCP
+                self._run_command(["ip", "addr", "flush", "dev", interface])
+                await asyncio.sleep(1)
+                success, _ = self._run_command(["dhcpcd", "-b", "-t", "30", interface])
+                if not success:
+                    # Try dhclient as fallback
+                    success, _ = self._run_command(["dhclient", "-v", interface])
             else:
                 # Static IP configuration
                 if ip_config:
@@ -362,6 +433,7 @@ network={{
                         self._run_command(["ip", "addr", "flush", "dev", interface])
                         self._run_command(["ip", "addr", "add", f"{ip_address}/{prefix}", "dev", interface])
                         if gateway:
+                            self._run_command(["ip", "route", "del", "default"])
                             self._run_command(["ip", "route", "add", "default", "via", gateway])
                         success = True
                     else:
@@ -369,10 +441,50 @@ network={{
                 else:
                     success = False
             
+            if success:
+                logger.info(f"WiFi connected successfully to {ssid}")
+                # Enable auto-connect on boot
+                await self._enable_wifi_autoconnect(interface)
+            else:
+                logger.error(f"Failed to get IP address for {ssid}")
+            
             return success
             
         except Exception as e:
             logger.error(f"Failed to connect WiFi: {e}")
+            return False
+
+    async def _enable_wifi_autoconnect(self, interface: str = "wlan0") -> bool:
+        """Enable WiFi auto-connect on boot using systemd service."""
+        try:
+            # Create systemd service for this interface
+            service_content = f"""[Unit]
+Description=WPA supplicant for {interface}
+Before=network.target
+After=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/wpa_supplicant -i{interface} -c/etc/wpa_supplicant.conf -Dnl80211,wext -C/var/run/wpa_supplicant
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+            service_path = f"/etc/systemd/system/wpa_supplicant-{interface}.service"
+            
+            with open(service_path, "w") as f:
+                f.write(service_content)
+            
+            # Enable the service to start on boot
+            self._run_command(["systemctl", "daemon-reload"])
+            self._run_command(["systemctl", "enable", f"wpa_supplicant-{interface}.service"])
+            
+            logger.info(f"Enabled auto-connect for {interface}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to enable auto-connect: {e}")
             return False
 
     async def get_wifi_ap_config(self) -> Dict[str, Any]:
@@ -479,5 +591,67 @@ IP_ADDRESS={ip_address}
             
         except Exception as e:
             logger.error(f"Failed to set AP config: {e}")
+            return False
+
+    async def get_wifi_client_config(self, interface: str = "wlan0") -> Dict[str, Any]:
+        """Get WiFi client configuration from wpa_supplicant config file."""
+        config = {
+            "enabled": False,
+            "interface": interface,
+            "ssid": "",
+            "password": "",
+            "method": "dhcp"
+        }
+        
+        # Check if wpa_supplicant is running for this interface
+        success, _ = self._run_command(["pgrep", "-f", f"wpa_supplicant.*{interface}"])
+        config["enabled"] = success
+        
+        # Read wpa_supplicant config
+        config_path = "/etc/wpa_supplicant.conf"
+        try:
+            with open(config_path, "r") as f:
+                content = f.read()
+                # Parse network block
+                import re
+                ssid_match = re.search(r'ssid="([^"]+)"', content)
+                if ssid_match:
+                    config["ssid"] = ssid_match.group(1)
+                
+                # Don't return the actual password for security
+                psk_match = re.search(r'psk="([^"]+)"', content)
+                if psk_match:
+                    config["password"] = "********"  # Mask the password
+                
+                # Check if it's an open network
+                key_mgmt_match = re.search(r'key_mgmt=(\w+)', content)
+                if key_mgmt_match and key_mgmt_match.group(1) == "NONE":
+                    config["password"] = ""  # Open network has no password
+        except IOError:
+            logger.debug(f"No WiFi config found at {config_path}")
+        
+        return config
+
+    async def disconnect_wifi(self, interface: str = "wlan0") -> bool:
+        """Disconnect from WiFi and disable auto-connect."""
+        try:
+            # Stop wpa_supplicant
+            self._run_command(["pkill", "-f", f"wpa_supplicant.*{interface}"])
+            
+            # Disable the service
+            self._run_command(["systemctl", "disable", f"wpa_supplicant-{interface}.service"])
+            
+            # Remove the service file
+            service_path = f"/etc/systemd/system/wpa_supplicant-{interface}.service"
+            self._run_command(["rm", "-f", service_path])
+            
+            # Remove the config file
+            config_path = "/etc/wpa_supplicant.conf"
+            self._run_command(["rm", "-f", config_path])
+            
+            logger.info(f"Disconnected WiFi on {interface}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to disconnect WiFi: {e}")
             return False
 
