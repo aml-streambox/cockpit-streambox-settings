@@ -37,6 +37,11 @@
             Storage Settings
           </button>
         </li>
+        <li class="sbs-tabs-item">
+          <button class="sbs-tabs-link" data-tab="updater">
+            Firmware Update
+          </button>
+        </li>
       </ul>
     </div>
 
@@ -386,6 +391,63 @@
           </div>
         </div>
       </div>
+
+      <!-- Updater Tab -->
+      <div id="updater-tab" class="tab-content">
+        <div class="sbs-card">
+          <div class="sbs-card-header">
+            <h2>Firmware Update</h2>
+            <button class="sbs-button sbs-button-small" id="updater-refresh-btn">Refresh</button>
+          </div>
+          <div class="sbs-card-body">
+            <div class="sbs-form-group">
+              <label class="sbs-label">Current Version</label>
+              <span id="updater-current-version" style="font-family: monospace; font-size: 14px;">loading...</span>
+            </div>
+
+            <div id="updater-error" class="sbs-updater-error" style="display: none;"></div>
+
+            <div id="updater-drop-zone" class="sbs-updater-drop-zone">
+              <div class="sbs-updater-drop-icon">&#x2191;</div>
+              <p>Drop <code>.swu</code> file here or click to browse</p>
+              <input type="file" id="updater-file-input" accept=".swu" style="display: none;">
+            </div>
+
+            <div id="updater-file-info" class="sbs-updater-file-info" style="display: none;"></div>
+
+            <div id="updater-progress-section" style="display: none;">
+              <h3>Uploading</h3>
+              <div class="sbs-updater-progress-container">
+                <div class="sbs-updater-progress-bar" id="updater-progress-bar"></div>
+              </div>
+              <span id="updater-progress-text">0%</span>
+            </div>
+
+            <div id="updater-verify-section" style="display: none;">
+              <h3>Verifying</h3>
+              <p class="sbs-loading">Computing SHA-256 checksum and validating package...</p>
+            </div>
+
+            <div id="updater-ready-section" style="display: none;">
+              <h3>&#x2713; Package Verified</h3>
+              <p>SHA-256 checksum matches. The update package is ready to apply.</p>
+              <div class="sbs-updater-warning">
+                &#x26A0;&#xFE0F; This will <strong>reboot the device</strong> to apply the update.
+                Any active streaming will be interrupted.
+              </div>
+              <button class="sbs-button sbs-button-primary" id="updater-start-btn" disabled>Start Update</button>
+              <button class="sbs-button sbs-button-small" id="updater-cancel-btn" style="display: none;">Cancel</button>
+            </div>
+
+            <div id="updater-updating-section" style="display: none;">
+              <h3>Updating</h3>
+              <p>The device is rebooting to apply the update. This may take a few minutes.</p>
+              <p>After the update completes, the device will restart automatically.</p>
+              <div class="sbs-updater-spinner"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="notification" class="sbs-notification sbs-hidden">
@@ -401,6 +463,7 @@
   <script src="network-settings.js"></script>
   <script src="hdmi-settings.js"></script>
   <script src="storage-settings.js"></script>
+  <script src="updater-settings.js"></script>
 </body>
 
 </html>

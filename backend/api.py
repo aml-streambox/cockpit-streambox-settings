@@ -17,6 +17,7 @@ except ImportError as e:
 from basic import BasicSettingsManager
 from config import ConfigManager
 from network import NetworkManager
+from updater import UpdaterManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class StreamboxSettingsInterface(dbus.service.Object):
         self.config_manager = config_manager
         self.basic_manager = BasicSettingsManager()
         self.network_manager = NetworkManager()
+        self.updater_manager = UpdaterManager()
         self._loop = asyncio.get_event_loop()
         self._callbacks = {}
         
@@ -741,6 +743,114 @@ class StreamboxSettingsInterface(dbus.service.Object):
             logger.error(f"UnmountDevice error: {e}")
             raise DBusError("OperationFailed", str(e))
 
+    # ==================== Updater Methods ====================
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="", out_signature="s"
+    )
+    def GetUpdaterStatus(self) -> str:
+        try:
+            return json.dumps(self.updater_manager.get_status())
+        except Exception as e:
+            logger.error(f"GetUpdaterStatus error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="t", out_signature="b"
+    )
+    def StartUpload(self, total_size: int) -> bool:
+        try:
+            success = self.updater_manager.start_upload(total_size)
+            if not success:
+                raise DBusError("UploadBusy", "Upload already in progress or invalid state")
+            self.UpdaterStatusChanged()
+            return success
+        except DBusError:
+            raise
+        except Exception as e:
+            logger.error(f"StartUpload error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="ayt", out_signature="d"
+    )
+    def UploadChunk(self, data: bytes, offset: int) -> float:
+        try:
+            progress = self.updater_manager.write_chunk(data, offset)
+            return progress
+        except Exception as e:
+            logger.error(f"UploadChunk error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="b"
+    )
+    def FinalizeUpload(self, expected_sha256: str) -> bool:
+        try:
+            success = self.updater_manager.finalize_upload(expected_sha256)
+            self.UpdaterStatusChanged()
+            return success
+        except Exception as e:
+            logger.error(f"FinalizeUpload error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="", out_signature="b"
+    )
+    def TriggerUpdate(self) -> bool:
+        try:
+            success = self.updater_manager.trigger_update()
+            if success:
+                self.UpdaterStatusChanged()
+            return success
+        except Exception as e:
+            logger.error(f"TriggerUpdate error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="", out_signature="b"
+    )
+    def CancelUpload(self) -> bool:
+        try:
+            success = self.updater_manager.cancel_upload()
+            self.UpdaterStatusChanged()
+            return success
+        except Exception as e:
+            logger.error(f"CancelUpload error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="b", out_signature="b"
+    )
+    def SetDryRun(self, enabled: bool) -> bool:
+        try:
+            self.updater_manager.set_dry_run(enabled)
+            self.UpdaterStatusChanged()
+            return True
+        except Exception as e:
+            logger.error(f"SetDryRun error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="ss", out_signature="b"
+    )
+    def ImportLocalFile(self, filepath: str, expected_sha256: str) -> bool:
+        try:
+            success = self.updater_manager.import_local_file(filepath, expected_sha256)
+            self.UpdaterStatusChanged()
+            return success
+        except Exception as e:
+            logger.error(f"ImportLocalFile error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
     @dbus.service.signal("org.cockpit.StreamboxSettings")
     def BasicSettingsChanged(self):
         pass
@@ -756,5 +866,10 @@ class StreamboxSettingsInterface(dbus.service.Object):
     @dbus.service.signal("org.cockpit.StreamboxSettings")
     def NetworkConfigChanged(self):
         """Signal emitted when network configuration changes."""
+        pass
+
+    @dbus.service.signal("org.cockpit.StreamboxSettings")
+    def UpdaterStatusChanged(self):
+        """Signal emitted when updater state changes."""
         pass
 

@@ -30,6 +30,9 @@ function connectDBus() {
             if (typeof StorageSettings !== 'undefined') {
                 StorageSettings.init();
             }
+            if (typeof UpdaterSettings !== 'undefined') {
+                UpdaterSettings.init();
+            }
             basicSettingsInitialized = true;
         }
 
