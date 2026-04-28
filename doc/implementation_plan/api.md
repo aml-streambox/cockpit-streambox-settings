@@ -87,6 +87,56 @@ Get list of available locales.
 
 ---
 
+### Application Switch
+
+#### GetApplicationStatus
+
+Get available Streambox application services and current selection state.
+
+| | Type | Description |
+|-|------|-------------|
+| **Returns** | `s` | JSON status string |
+
+**Example Response:**
+```json
+{
+  "active_application": "gst-manager",
+  "default_application": "gst-manager",
+  "conflict": false,
+  "applications": [
+    {
+      "id": "gst-manager",
+      "name": "GStreamer Manager",
+      "service": "gst-manager.service",
+      "available": true,
+      "active": true,
+      "enabled": true
+    },
+    {
+      "id": "one-kvm",
+      "name": "One-KVM",
+      "service": "one-kvm.service",
+      "available": true,
+      "active": false,
+      "enabled": false
+    }
+  ]
+}
+```
+
+---
+
+#### SetActiveApplication
+
+Switch the active Streambox application. The daemon disables and stops the non-selected service, then starts and enables the selected service.
+
+| | Type | Description |
+|-|------|-------------|
+| **application_id** | `s` | `gst-manager` or `one-kvm` |
+| **Returns** | `b` | Success |
+
+---
+
 ### Network Settings
 
 #### GetNetworkStatus
@@ -713,6 +763,16 @@ Emitted when basic settings change.
 
 ---
 
+#### ApplicationChanged
+
+Emitted when the active Streambox application changes.
+
+| | Type | Description |
+|-|------|-------------|
+| **application_id** | `s` | New active application ID |
+
+---
+
 #### NetworkStatusChanged
 
 Emitted when network status changes.
@@ -770,6 +830,7 @@ Emitted when system status changes.
 | `InvalidHostname` | Invalid hostname format |
 | `InvalidTimezone` | Invalid timezone |
 | `InvalidLocale` | Invalid locale |
+| `InvalidApplication` | Invalid application selection |
 | `NetworkError` | Network operation failed |
 | `WifiConnectFailed` | WiFi connection failed |
 | `WifiScanFailed` | WiFi scan failed |

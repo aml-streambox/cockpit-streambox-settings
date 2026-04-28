@@ -115,6 +115,12 @@ body {
   font-size: 14px;
 }
 
+.sbs-help-text {
+  margin: 0;
+  color: #6a6e73;
+  font-size: 14px;
+}
+
 .sbs-input {
   flex: 1;
   min-width: 200px;

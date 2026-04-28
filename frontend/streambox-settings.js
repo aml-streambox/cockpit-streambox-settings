@@ -21,6 +21,9 @@ function connectDBus() {
 
         if (!basicSettingsInitialized) {
             BasicSettings.init();
+            if (typeof ApplicationSettings !== 'undefined') {
+                ApplicationSettings.init();
+            }
             if (typeof NetworkSettings !== 'undefined') {
                 NetworkSettings.init();
             }
@@ -63,6 +66,12 @@ function setupDBusSignals() {
                 break;
             case "ConfigChanged":
                 console.log("Config changed:", signalData);
+                break;
+            case "ApplicationChanged":
+                console.log("Application changed:", signalData);
+                if (typeof ApplicationSettings !== 'undefined') {
+                    ApplicationSettings.refresh();
+                }
                 break;
             case "TvserverConfigChanged":
                 console.log("TVServer config changed:", signalData);

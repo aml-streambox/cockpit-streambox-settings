@@ -13,6 +13,7 @@ A Cockpit plugin for managing system settings on Amlogic A311D2 (T6/T7) Streambo
 ## Features
 
 - **Basic Settings** - Device name, timezone, system locale
+- **Application Switch** - Select either GStreamer Manager or One-KVM as the running app
 - **Network Settings** - Wired, WiFi client, WiFi AP configuration
 - **TVServer Settings** - Video, audio, HDCP, debug configuration
 - **Storage Settings** - SDCard management, formatting, mount points

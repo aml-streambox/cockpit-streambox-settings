@@ -14,6 +14,7 @@ except ImportError as e:
     logging.error(f"Failed to import required modules: {e}")
     raise
 
+from applications import ApplicationManager
 from basic import BasicSettingsManager
 from config import ConfigManager
 from network import NetworkManager
@@ -33,6 +34,7 @@ class StreamboxSettingsInterface(dbus.service.Object):
     def __init__(self, config_manager: ConfigManager, bus):
         self.config_manager = config_manager
         self.basic_manager = BasicSettingsManager()
+        self.application_manager = ApplicationManager()
         self.network_manager = NetworkManager()
         self.updater_manager = UpdaterManager()
         self._loop = asyncio.get_event_loop()
@@ -42,6 +44,7 @@ class StreamboxSettingsInterface(dbus.service.Object):
 
     async def _async_init(self):
         await self.basic_manager.initialize()
+        await self.application_manager.initialize()
         await self.network_manager.initialize()
 
     def cleanup(self):
@@ -133,6 +136,43 @@ class StreamboxSettingsInterface(dbus.service.Object):
             )
         except Exception as e:
             logger.error(f"GetAvailableLocales error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    # ==================== Application Switch Methods ====================
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="", out_signature="s"
+    )
+    def GetApplicationStatus(self) -> str:
+        """Get selectable Streambox applications and service state as JSON."""
+        try:
+            status = self._loop.run_until_complete(
+                self.application_manager.get_status()
+            )
+            return json.dumps(status)
+        except Exception as e:
+            logger.error(f"GetApplicationStatus error: {e}")
+            raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="b"
+    )
+    def SetActiveApplication(self, application_id: str) -> bool:
+        """Switch the active Streambox application service."""
+        try:
+            success = self._loop.run_until_complete(
+                self.application_manager.set_active_application(application_id)
+            )
+            if success:
+                self.ApplicationChanged(application_id)
+            return success
+        except ValueError as e:
+            logger.error(f"SetActiveApplication error: {e}")
+            raise DBusError("InvalidApplication", str(e))
+        except Exception as e:
+            logger.error(f"SetActiveApplication error: {e}")
             raise DBusError("OperationFailed", str(e))
 
     @dbus.service.method(
@@ -856,6 +896,11 @@ class StreamboxSettingsInterface(dbus.service.Object):
         pass
 
     @dbus.service.signal("org.cockpit.StreamboxSettings", signature="s")
+    def ApplicationChanged(self, application_id: str):
+        """Signal emitted when the active Streambox application changes."""
+        pass
+
+    @dbus.service.signal("org.cockpit.StreamboxSettings", signature="s")
     def ConfigChanged(self, config_json: str):
         pass
 
@@ -872,4 +917,3 @@ class StreamboxSettingsInterface(dbus.service.Object):
     def UpdaterStatusChanged(self):
         """Signal emitted when updater state changes."""
         pass
-

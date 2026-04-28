@@ -78,6 +78,22 @@
             </div>
           </div>
         </div>
+
+        <div class="sbs-card">
+          <div class="sbs-card-header">
+            <h2>Application Switch</h2>
+          </div>
+          <div class="sbs-card-body">
+            <div class="sbs-form-group">
+              <label for="active-application" class="sbs-label">Active Application</label>
+              <select id="active-application" class="sbs-select">
+                <option value="">Loading...</option>
+              </select>
+              <button id="apply-application" class="sbs-button sbs-button-primary">Switch Application</button>
+            </div>
+            <p id="application-status" class="sbs-help-text">Loading application status...</p>
+          </div>
+        </div>
       </div>
 
       <div id="network-tab" class="tab-content">
@@ -460,6 +476,7 @@
 
   <script src="streambox-settings.js"></script>
   <script src="basic-settings.js"></script>
+  <script src="application-settings.js"></script>
   <script src="network-settings.js"></script>
   <script src="hdmi-settings.js"></script>
   <script src="storage-settings.js"></script>

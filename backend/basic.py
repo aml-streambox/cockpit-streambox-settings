@@ -64,7 +64,14 @@ class BasicSettingsManager:
             hostname = hostname[:-1]
 
         allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.")
-        return all(c in allowed for c in hostname) and not hostname.startswith("-")
+        if not all(c in allowed for c in hostname):
+            return False
+
+        labels = hostname.split(".")
+        return all(
+            label and len(label) <= 63 and not label.startswith("-") and not label.endswith("-")
+            for label in labels
+        )
 
     async def get_timezone(self) -> str:
         success, timezone = self._run_command(["timedatectl", "show", "-p", "Timezone", "--value"])

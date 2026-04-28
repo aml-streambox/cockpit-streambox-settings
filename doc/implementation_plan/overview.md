@@ -2,13 +2,14 @@
 
 ## Project Summary
 
-A Cockpit plugin for Amlogic A311D2 (T6) Streambox that manages system settings through four main tabs: Basic Settings, Network Settings, TVServer Settings, and Storage Settings.
+A Cockpit plugin for Amlogic A311D2 (T6) Streambox that manages system settings through Basic Settings, Application Switch, Network Settings, TVServer Settings, and Storage Settings.
 
 ### Key Features
 
 | Feature | Description |
 |---------|-------------|
 | Basic Settings | Device name (hostname), timezone, system locale |
+| Application Switch | Select which mutually exclusive app service runs: GStreamer Manager or One-KVM |
 | Network Settings | Wired network, WiFi client, WiFi AP configuration |
 | TVServer Settings | Video, audio, HDCP, debug configuration from tvserver |
 | Storage Settings | SDCard management, formatting, mount points |
@@ -37,8 +38,8 @@ A Cockpit plugin for Amlogic A311D2 (T6) Streambox that manages system settings 
 ┌─────────────────────────────────────────────────────────────┐
 │                    Cockpit Web UI                           │
 │  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────┐ │
-│  │ Basic        │ │ Network      │ │ TVServer             │ │
-│  │ Settings     │ │ Settings     │ │ Settings             │ │
+│  │ Basic        │ │ Application │ │ Network              │ │
+│  │ Settings     │ │ Switch      │ │ Settings             │ │
 │  └──────────────┘ └──────────────┘ └──────────────────────┘ │
 │  ┌──────────────┐                                        │
 │  │ Storage      │                                        │
@@ -49,8 +50,8 @@ A Cockpit plugin for Amlogic A311D2 (T6) Streambox that manages system settings 
 ┌─────────────────────────────────────────────────────────────┐
 │              streambox-settings Daemon                     │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌─────────┐ │
-│  │ Basic      │ │ Network    │ │ TVServer   │ │ Storage │ │
-│  │ Manager    │ │ Manager    │ │ Manager    │ │ Manager │ │
+│  │ Basic      │ │ App       │ │ Network    │ │ Storage │ │
+│  │ Manager    │ │ Manager   │ │ Manager    │ │ Manager │ │
 │  └───────────┘ └───────────┘ └───────────┘ └─────────┘ │
 └─────────────────────────────────────────────────────────────┘
                            │
@@ -81,6 +82,7 @@ cockpit-streambox-settings/
 ├── backend/
 │   ├── main.py                   # Entry point
 │   ├── basic.py                  # Basic settings (hostname, timezone)
+│   ├── applications.py           # Application service switching
 │   ├── network.py                # Network settings (wired, WiFi)
 │   ├── tvserver.py               # TVServer config management
 │   ├── storage.py                # Storage management (SDCard)
@@ -91,6 +93,7 @@ cockpit-streambox-settings/
 │   ├── index.html                # Entry point
 │   ├── streambox-settings.js     # Main logic
 │   ├── basic-settings.js         # Basic settings UI
+│   ├── application-settings.js   # Application switch UI
 │   ├── network-settings.js       # Network settings UI
 │   ├── tvserver-settings.js     # TVServer settings UI
 │   ├── storage-settings.js       # Storage settings UI
@@ -132,11 +135,13 @@ cockpit-streambox-settings/
 - System Locale
 - (Optional) NTP server settings
 - (Optional) Keyboard layout
+- Application Switch (GStreamer Manager or One-KVM)
 
 **System Commands:**
 - `hostnamectl` - Set hostname
 - `timedatectl` - Set timezone
 - `localectl` - Set locale
+- `systemctl` - Switch between `gst-manager.service` and `one-kvm.service`
 
 ### 2. Network Settings Tab
 
