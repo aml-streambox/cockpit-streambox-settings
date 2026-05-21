@@ -14,11 +14,15 @@ class ApplicationManager:
     APPLICATIONS = {
         "gst-manager": {
             "name": "GStreamer Manager",
-            "service": "gst-manager.service",
+            "services": ["gst-manager.service"],
         },
         "one-kvm": {
             "name": "One-KVM",
-            "service": "one-kvm.service",
+            "services": ["one-kvm.service"],
+        },
+        "streambox-studio": {
+            "name": "Streambox Studio",
+            "services": ["sbs-server.service", "sbs-webui.service"],
         },
     }
 
@@ -69,6 +73,9 @@ class ApplicationManager:
         success, _ = self._run_command(["systemctl", "is-enabled", "--quiet", service])
         return success
 
+    def _app_services(self, app: Dict[str, Any]) -> List[str]:
+        return app["services"]
+
     def _systemctl(self, action: str, service: str) -> bool:
         success, output = self._run_command(["systemctl", action, service])
         if not success:
@@ -82,10 +89,26 @@ class ApplicationManager:
         enabled_ids = []
 
         for app_id, app in self.APPLICATIONS.items():
-            service = app["service"]
-            available = self._service_available(service)
-            active = available and self._service_active(service)
-            enabled = available and self._service_enabled(service)
+            services = self._app_services(app)
+            service_statuses = []
+            available = True
+            active = False
+            enabled = False
+
+            for service in services:
+                service_available = self._service_available(service)
+                service_active = service_available and self._service_active(service)
+                service_enabled = service_available and self._service_enabled(service)
+
+                available = available and service_available
+                active = active or service_active
+                enabled = enabled or service_enabled
+                service_statuses.append({
+                    "service": service,
+                    "available": service_available,
+                    "active": service_active,
+                    "enabled": service_enabled,
+                })
 
             if active:
                 active_ids.append(app_id)
@@ -95,7 +118,9 @@ class ApplicationManager:
             applications.append({
                 "id": app_id,
                 "name": app["name"],
-                "service": service,
+                "service": services[0],
+                "services": services,
+                "service_statuses": service_statuses,
                 "available": available,
                 "active": active,
                 "enabled": enabled,
@@ -121,29 +146,31 @@ class ApplicationManager:
         if application_id not in self.APPLICATIONS:
             raise ValueError(f"Invalid application: {application_id}")
 
-        target_service = self.APPLICATIONS[application_id]["service"]
-        if not self._service_available(target_service):
-            logger.error(f"Target service is not available: {target_service}")
-            return False
+        target_services = self._app_services(self.APPLICATIONS[application_id])
+        for target_service in target_services:
+            if not self._service_available(target_service):
+                logger.error(f"Target service is not available: {target_service}")
+                return False
 
         for other_id, other_app in self.APPLICATIONS.items():
             if other_id == application_id:
                 continue
 
-            other_service = other_app["service"]
-            if not self._service_available(other_service):
-                logger.warning(f"Skipping unavailable service: {other_service}")
-                continue
+            for other_service in self._app_services(other_app):
+                if not self._service_available(other_service):
+                    logger.warning(f"Skipping unavailable service: {other_service}")
+                    continue
 
-            if not self._systemctl("disable", other_service):
-                return False
-            if not self._systemctl("stop", other_service):
-                return False
+                if not self._systemctl("disable", other_service):
+                    return False
+                if not self._systemctl("stop", other_service):
+                    return False
 
-        if not self._systemctl("start", target_service):
-            return False
-        if not self._systemctl("enable", target_service):
-            return False
+        for target_service in target_services:
+            if not self._systemctl("start", target_service):
+                return False
+            if not self._systemctl("enable", target_service):
+                return False
 
         logger.info(f"Active application switched to: {application_id}")
         return True
