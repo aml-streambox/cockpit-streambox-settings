@@ -406,6 +406,80 @@
             </div>
           </div>
         </div>
+
+        <div class="sbs-card" style="margin-top: 20px;">
+          <div class="sbs-card-header">
+            <h2>Network Storage</h2>
+          </div>
+          <div class="sbs-card-body">
+            <input id="network-storage-id" type="hidden" value="">
+            <div class="sbs-form-group">
+              <label for="network-storage-name" class="sbs-label">Name</label>
+              <input id="network-storage-name" class="sbs-input" type="text" placeholder="Media share">
+            </div>
+            <div class="sbs-form-group">
+              <label for="network-storage-protocol" class="sbs-label">Type</label>
+              <select id="network-storage-protocol" class="sbs-select">
+                <option value="nfs">NFS</option>
+                <option value="smb">SMB / Samba</option>
+              </select>
+            </div>
+            <div class="sbs-form-group">
+              <label for="network-storage-remote" class="sbs-label">Remote Path</label>
+              <input id="network-storage-remote" class="sbs-input" type="text" placeholder="server:/export/path or //server/share">
+            </div>
+            <div class="sbs-form-group">
+              <label for="network-storage-mount-point" class="sbs-label">Mount Point</label>
+              <input id="network-storage-mount-point" class="sbs-input" type="text" placeholder="/mnt/media-share">
+            </div>
+            <div id="network-storage-credentials">
+              <div class="sbs-form-group">
+                <label for="network-storage-username" class="sbs-label">Username</label>
+                <input id="network-storage-username" class="sbs-input" type="text" autocomplete="username">
+              </div>
+              <div class="sbs-form-group">
+                <label for="network-storage-password" class="sbs-label">Password</label>
+                <input id="network-storage-password" class="sbs-input" type="password" autocomplete="current-password">
+              </div>
+            </div>
+            <div class="sbs-form-group">
+              <label for="network-storage-options" class="sbs-label">Options</label>
+              <input id="network-storage-options" class="sbs-input" type="text" placeholder="rw,vers=3">
+            </div>
+            <div class="sbs-form-group">
+              <label class="sbs-toggle">
+                <input type="checkbox" id="network-storage-enabled" checked>
+                <span class="sbs-toggle-slider"></span>
+              </label>
+              <span class="sbs-help-text">Enabled</span>
+              <label class="sbs-toggle">
+                <input type="checkbox" id="network-storage-auto-mount" checked>
+                <span class="sbs-toggle-slider"></span>
+              </label>
+              <span class="sbs-help-text">Mount automatically on boot</span>
+              <button id="save-network-storage" class="sbs-button sbs-button-primary" onclick="StorageSettings.saveNetworkStorageEntry(false)">Add Network Storage</button>
+              <button id="save-mount-network-storage" class="sbs-button sbs-button-secondary" onclick="StorageSettings.saveNetworkStorageEntry(true)">Add & Mount</button>
+              <button id="cancel-network-storage-edit" class="sbs-button sbs-button-secondary" style="display: none;">Cancel Edit</button>
+            </div>
+            <div id="network-storage-feedback" class="sbs-help-text" style="display: none;"></div>
+            <table class="sbs-table" id="network-storage-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Remote</th>
+                  <th>Mount Point</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Boot</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="network-storage-mounts">
+              </tbody>
+            </table>
+            <p id="no-network-storage-message" style="display: none; color: #666;">No network storage mounted.</p>
+          </div>
+        </div>
       </div>
 
       <!-- Updater Tab -->
@@ -479,7 +553,7 @@
   <script src="application-settings.js"></script>
   <script src="network-settings.js"></script>
   <script src="hdmi-settings.js"></script>
-  <script src="storage-settings.js"></script>
+  <script src="storage-settings.js?v=20260522-network-storage-managed"></script>
   <script src="updater-settings.js"></script>
 </body>
 

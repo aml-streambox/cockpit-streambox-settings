@@ -3,6 +3,10 @@
 import asyncio
 import json
 import logging
+import os
+import re
+import shutil
+import uuid
 from typing import Any, Dict, List
 
 try:
@@ -21,6 +25,8 @@ from network import NetworkManager
 from updater import UpdaterManager
 
 logger = logging.getLogger(__name__)
+
+NETWORK_STORAGE_CONFIG = "/etc/streambox-settings/network-storage.json"
 
 
 class DBusError(Exception):
@@ -49,6 +55,289 @@ class StreamboxSettingsInterface(dbus.service.Object):
 
     def cleanup(self):
         pass
+
+    def _safe_mount_name(self, value: str) -> str:
+        name = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip().strip("/")).strip("-.")
+        return name or "network-storage"
+
+    def _validate_mount_point(self, mount_point: str) -> str:
+        mount_point = mount_point.strip()
+        if not mount_point:
+            raise ValueError("Mount point is required")
+        mount_point = os.path.normpath(mount_point)
+        if not mount_point.startswith(("/mnt/", "/media/")):
+            raise ValueError("Mount point must be under /mnt or /media")
+        if ".." in mount_point.split(os.sep):
+            raise ValueError("Mount point cannot contain '..'")
+        return mount_point
+
+    def _normalize_network_mount(self, protocol: str, remote: str, mount_point: str, options: str) -> Dict[str, str]:
+        protocol = protocol.strip().lower()
+        remote = remote.strip()
+        options = options.strip()
+
+        if protocol in ("smb", "samba", "cifs"):
+            fstype = "cifs"
+            if not remote.startswith("//") or remote.count("/") < 3:
+                raise ValueError("SMB path must use //server/share format")
+        elif protocol in ("nfs", "nfs4"):
+            fstype = "nfs4" if protocol == "nfs4" else "nfs"
+            if ":" not in remote or remote.startswith("-"):
+                raise ValueError("NFS path must use server:/export/path format")
+        else:
+            raise ValueError("Protocol must be nfs or smb")
+
+        if any(ch.isspace() for ch in remote) or remote.startswith("-"):
+            raise ValueError("Remote path contains invalid characters")
+        if options and not re.match(r"^[A-Za-z0-9_.,=:/@%+-]+$", options):
+            raise ValueError("Options contain invalid characters")
+
+        if not mount_point.strip():
+            mount_point = f"/mnt/{self._safe_mount_name(remote)}"
+
+        return {
+            "fstype": fstype,
+            "remote": remote,
+            "mount_point": self._validate_mount_point(mount_point),
+            "options": options,
+        }
+
+    def _write_credentials_file(self, remote: str, username: str, password: str) -> str:
+        credentials_dir = "/etc/streambox-settings/credentials"
+        os.makedirs(credentials_dir, mode=0o700, exist_ok=True)
+        credentials_path = os.path.join(credentials_dir, f"{self._safe_mount_name(remote)}.cred")
+        fd = os.open(credentials_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(f"username={username}\n")
+            f.write(f"password={password}\n")
+        return credentials_path
+
+    def _network_mount_options(self, fstype: str, options: str, remote: str, username: str, password: str) -> str:
+        option_parts = [part for part in options.split(",") if part]
+        for default_option in ("_netdev", "nofail"):
+            if default_option not in option_parts:
+                option_parts.append(default_option)
+
+        if fstype == "cifs":
+            if username:
+                credentials_path = self._write_credentials_file(remote, username, password)
+                option_parts.append(f"credentials={credentials_path}")
+            elif "guest" not in option_parts:
+                option_parts.append("guest")
+
+        return ",".join(option_parts) or "defaults"
+
+    def _ensure_default_network_mount_options(self, options: str) -> str:
+        option_parts = [part for part in options.split(",") if part]
+        for default_option in ("_netdev", "nofail"):
+            if default_option not in option_parts:
+                option_parts.append(default_option)
+        return ",".join(option_parts) or "_netdev,nofail"
+
+    def _network_mount_error(self, message: str) -> str:
+        logger.error(message)
+        return json.dumps({"success": False, "error": message})
+
+    def _network_mount_success(self, mount_point: str) -> str:
+        return json.dumps({"success": True, "mount_point": mount_point})
+
+    def _network_storage_result(self, success: bool, **kwargs) -> str:
+        payload = {"success": success}
+        payload.update(kwargs)
+        if not success and "error" in kwargs:
+            logger.error(kwargs["error"])
+        return json.dumps(payload)
+
+    def _check_network_mount_helper(self, fstype: str) -> str:
+        helper = f"mount.{fstype}"
+        if shutil.which(helper):
+            return ""
+        if fstype == "cifs":
+            return "SMB/CIFS mount helper is not installed. Install cifs-utils or include mount.cifs in the image."
+        if fstype in ("nfs", "nfs4"):
+            return "NFS mount helper is not installed. Install nfs-utils or include mount.nfs in the image."
+        return f"Mount helper {helper} is not installed."
+
+    def _update_fstab_network_mount(self, remote: str, mount_point: str, fstype: str, options: str) -> None:
+        marker = "# streambox-network-storage"
+        fstab_path = "/etc/fstab"
+        lines = []
+        if os.path.exists(fstab_path):
+            with open(fstab_path, "r") as f:
+                lines = f.readlines()
+
+        escaped_mount_point = mount_point.replace(" ", "\\040")
+        filtered = []
+        for line in lines:
+            parts = line.split()
+            if marker in line and len(parts) >= 2 and parts[1] == escaped_mount_point:
+                continue
+            filtered.append(line)
+
+        filtered.append(f"{remote} {escaped_mount_point} {fstype} {options} 0 0 {marker}\n")
+        with open(fstab_path, "w") as f:
+            f.writelines(filtered)
+
+    def _remove_fstab_network_mount(self, mount_point: str) -> None:
+        marker = "# streambox-network-storage"
+        fstab_path = "/etc/fstab"
+        if not os.path.exists(fstab_path):
+            return
+
+        escaped_mount_point = mount_point.replace(" ", "\\040")
+        with open(fstab_path, "r") as f:
+            lines = f.readlines()
+
+        filtered = []
+        for line in lines:
+            parts = line.split()
+            if marker in line and len(parts) >= 2 and parts[1] == escaped_mount_point:
+                continue
+            filtered.append(line)
+
+        with open(fstab_path, "w") as f:
+            f.writelines(filtered)
+
+    def _load_network_storage_entries(self) -> List[Dict[str, Any]]:
+        if not os.path.exists(NETWORK_STORAGE_CONFIG):
+            return []
+        with open(NETWORK_STORAGE_CONFIG, "r") as f:
+            data = json.load(f)
+        entries = data.get("entries", []) if isinstance(data, dict) else []
+        valid_entries = [entry for entry in entries if isinstance(entry, dict)]
+        changed = False
+        for entry in valid_entries:
+            mount_options = entry.get("mount_options", "")
+            normalized_options = self._ensure_default_network_mount_options(mount_options)
+            if normalized_options != mount_options:
+                entry["mount_options"] = normalized_options
+                changed = True
+        if changed:
+            self._save_network_storage_entries(valid_entries)
+        return valid_entries
+
+    def _save_network_storage_entries(self, entries: List[Dict[str, Any]]) -> None:
+        os.makedirs(os.path.dirname(NETWORK_STORAGE_CONFIG), mode=0o755, exist_ok=True)
+        fd = os.open(NETWORK_STORAGE_CONFIG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump({"entries": entries}, f, indent=2)
+            f.write("\n")
+        self._sync_network_storage_fstab(entries)
+
+    def _sync_network_storage_fstab(self, entries: List[Dict[str, Any]]) -> None:
+        marker = "# streambox-network-storage"
+        fstab_path = "/etc/fstab"
+        lines = []
+        if os.path.exists(fstab_path):
+            with open(fstab_path, "r") as f:
+                lines = [line for line in f.readlines() if marker not in line]
+
+        for entry in entries:
+            if not entry.get("enabled", True) or not entry.get("auto_mount", False):
+                continue
+            mount_point = entry["mount_point"].replace(" ", "\\040")
+            lines.append(
+                f"{entry['remote']} {mount_point} {entry['fstype']} {entry['mount_options']} 0 0 {marker} id={entry['id']}\n"
+            )
+
+        with open(fstab_path, "w") as f:
+            f.writelines(lines)
+
+    def _get_mounted_network_paths(self) -> Dict[str, Dict[str, str]]:
+        mounts = {}
+        if not os.path.exists("/proc/mounts"):
+            return mounts
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                remote, mount_point, fstype = parts[:3]
+                if fstype in ("nfs", "nfs4", "cifs") or remote.startswith("//") or ":" in remote:
+                    mounts[mount_point.replace("\\040", " ")] = {
+                        "remote": remote,
+                        "mount_point": mount_point.replace("\\040", " "),
+                        "fstype": fstype,
+                    }
+        return mounts
+
+    def _public_network_storage_entry(self, entry: Dict[str, Any], mounts: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
+        mount = mounts.get(entry.get("mount_point", ""))
+        return {
+            "id": entry.get("id", ""),
+            "name": entry.get("name", ""),
+            "protocol": entry.get("protocol", ""),
+            "remote": entry.get("remote", ""),
+            "mount_point": entry.get("mount_point", ""),
+            "fstype": entry.get("fstype", ""),
+            "options": entry.get("options", ""),
+            "username": entry.get("username", ""),
+            "enabled": bool(entry.get("enabled", True)),
+            "auto_mount": bool(entry.get("auto_mount", False)),
+            "mounted": bool(mount),
+            "last_error": entry.get("last_error", ""),
+        }
+
+    def _find_network_storage_entry(self, entry_id: str) -> Dict[str, Any]:
+        for entry in self._load_network_storage_entries():
+            if entry.get("id") == entry_id:
+                return entry
+        raise ValueError("Network storage entry not found")
+
+    def _set_network_storage_last_error(self, entry_id: str, error: str) -> None:
+        if not entry_id:
+            return
+        entries = self._load_network_storage_entries()
+        changed = False
+        for entry in entries:
+            if entry.get("id") == entry_id:
+                entry["last_error"] = error
+                changed = True
+                break
+        if changed:
+            self._save_network_storage_entries(entries)
+
+    def _mount_network_storage_entry(self, entry: Dict[str, Any]) -> str:
+        if not entry.get("enabled", True):
+            self._set_network_storage_last_error(entry.get("id", ""), "Network storage entry is disabled")
+            return self._network_storage_result(False, error="Network storage entry is disabled")
+
+        helper_error = self._check_network_mount_helper(entry["fstype"])
+        if helper_error:
+            self._set_network_storage_last_error(entry.get("id", ""), helper_error)
+            return self._network_storage_result(False, error=helper_error)
+
+        import subprocess
+
+        os.makedirs(entry["mount_point"], exist_ok=True)
+        result = subprocess.run(
+            ["mount", "-t", entry["fstype"], "-o", entry["mount_options"], entry["remote"], entry["mount_point"]],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        if result.returncode != 0:
+            error = result.stderr.strip() or result.stdout.strip() or "mount command failed"
+            self._set_network_storage_last_error(entry.get("id", ""), f"Network mount failed: {error}")
+            return self._network_storage_result(False, error=f"Network mount failed: {error}")
+
+        logger.info(f"Mounted network storage {entry['remote']} at {entry['mount_point']}")
+        self._set_network_storage_last_error(entry.get("id", ""), "")
+        return self._network_storage_result(True, mount_point=entry["mount_point"])
+
+    def _unmount_network_storage_entry(self, entry: Dict[str, Any]) -> str:
+        import subprocess
+
+        result = subprocess.run(["umount", entry["mount_point"]], capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            error = result.stderr.strip() or result.stdout.strip() or "umount command failed"
+            self._set_network_storage_last_error(entry.get("id", ""), f"Network unmount failed: {error}")
+            return self._network_storage_result(False, error=f"Network unmount failed: {error}")
+
+        logger.info(f"Unmounted network storage at {entry['mount_point']}")
+        self._set_network_storage_last_error(entry.get("id", ""), "")
+        return self._network_storage_result(True, mount_point=entry["mount_point"])
 
     @dbus.service.method(
         "org.cockpit.StreamboxSettings",
@@ -652,6 +941,7 @@ class StreamboxSettingsInterface(dbus.service.Object):
             import subprocess
             
             filesystems = []
+            network_mounts = []
             
             # Get filesystem info from df
             result = subprocess.run(
@@ -696,11 +986,285 @@ class StreamboxSettingsInterface(dbus.service.Object):
                             "use_percent": use_percent,
                             "label": label
                         })
-            
-            return json.dumps({"filesystems": filesystems})
+
+                        if parts[2] in ("nfs", "nfs4", "cifs") or parts[0].startswith("//") or ":" in parts[0]:
+                            network_mounts.append({
+                                "remote": parts[0],
+                                "mount_point": parts[1],
+                                "fstype": parts[2],
+                                "size": int(parts[3]),
+                                "used": int(parts[4]),
+                                "available": int(parts[5]),
+                                "use_percent": use_percent,
+                            })
+
+            mounts = self._get_mounted_network_paths()
+            entries = [
+                self._public_network_storage_entry(entry, mounts)
+                for entry in self._load_network_storage_entries()
+            ]
+
+            return json.dumps({
+                "filesystems": filesystems,
+                "network_mounts": network_mounts,
+                "network_storage_entries": entries,
+            })
         except Exception as e:
             logger.error(f"GetStorageInfo error: {e}")
             raise DBusError("OperationFailed", str(e))
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="", out_signature="s"
+    )
+    def GetNetworkStorageEntries(self) -> str:
+        """Get configured network storage entries."""
+        try:
+            mounts = self._get_mounted_network_paths()
+            entries = [
+                self._public_network_storage_entry(entry, mounts)
+                for entry in self._load_network_storage_entries()
+            ]
+            return json.dumps({"entries": entries})
+        except Exception as e:
+            return self._network_storage_result(False, error=f"GetNetworkStorageEntries error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="ssssssssbb", out_signature="s"
+    )
+    def SaveNetworkStorageEntry(self, entry_id: str, name: str, protocol: str, remote: str,
+                                mount_point: str, username: str, password: str, options: str,
+                                enabled: bool, auto_mount: bool) -> str:
+        """Create or update a configured network storage entry."""
+        try:
+            mount_config = self._normalize_network_mount(protocol, remote, mount_point, options)
+            entries = self._load_network_storage_entries()
+            existing = None
+            for entry in entries:
+                if entry.get("id") == entry_id:
+                    existing = entry
+                    break
+
+            entry_id = entry_id.strip() or str(uuid.uuid4())
+            protocol = "smb" if mount_config["fstype"] == "cifs" else mount_config["fstype"]
+            credential_file = existing.get("credential_file", "") if existing else ""
+            username = username.strip()
+            mount_options = mount_config["options"]
+
+            if mount_config["fstype"] == "cifs":
+                option_parts = [part for part in mount_options.split(",") if part]
+                for default_option in ("_netdev", "nofail"):
+                    if default_option not in option_parts:
+                        option_parts.append(default_option)
+                if username:
+                    if existing and username != existing.get("username", "") and not password:
+                        return self._network_storage_result(False, error="Password is required when changing the SMB username")
+                    if password or not credential_file:
+                        credential_file = self._write_credentials_file(mount_config["remote"], username, password)
+                    option_parts = [part for part in option_parts if not part.startswith("credentials=") and part != "guest"]
+                    option_parts.append(f"credentials={credential_file}")
+                elif "guest" not in option_parts:
+                    option_parts.append("guest")
+                mount_options = ",".join(option_parts)
+            else:
+                mount_options = self._network_mount_options(mount_config["fstype"], mount_options, mount_config["remote"], "", "")
+
+            saved_entry = {
+                "id": entry_id,
+                "name": name.strip() or self._safe_mount_name(mount_config["remote"]),
+                "protocol": protocol,
+                "fstype": mount_config["fstype"],
+                "remote": mount_config["remote"],
+                "mount_point": mount_config["mount_point"],
+                "options": mount_config["options"],
+                "mount_options": mount_options,
+                "username": username,
+                "credential_file": credential_file,
+                "enabled": bool(enabled),
+                "auto_mount": bool(auto_mount),
+                "last_error": existing.get("last_error", "") if existing else "",
+            }
+
+            if existing:
+                entries = [saved_entry if entry.get("id") == entry_id else entry for entry in entries]
+            else:
+                entries.append(saved_entry)
+
+            self._save_network_storage_entries(entries)
+            mounts = self._get_mounted_network_paths()
+            helper_warning = self._check_network_mount_helper(saved_entry["fstype"])
+            return self._network_storage_result(
+                True,
+                entry=self._public_network_storage_entry(saved_entry, mounts),
+                warning=helper_warning,
+            )
+        except Exception as e:
+            return self._network_storage_result(False, error=f"SaveNetworkStorageEntry error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="s"
+    )
+    def DeleteNetworkStorageEntry(self, entry_id: str) -> str:
+        """Delete a configured network storage entry."""
+        try:
+            entries = self._load_network_storage_entries()
+            entry = None
+            kept_entries = []
+            for current in entries:
+                if current.get("id") == entry_id:
+                    entry = current
+                else:
+                    kept_entries.append(current)
+            if not entry:
+                return self._network_storage_result(False, error="Network storage entry not found")
+
+            if self._get_mounted_network_paths().get(entry.get("mount_point", "")):
+                result = json.loads(self._unmount_network_storage_entry(entry))
+                if not result.get("success"):
+                    return json.dumps(result)
+
+            credential_file = entry.get("credential_file", "")
+            if credential_file.startswith("/etc/streambox-settings/credentials/") and os.path.exists(credential_file):
+                os.remove(credential_file)
+
+            self._save_network_storage_entries(kept_entries)
+            return self._network_storage_result(True)
+        except Exception as e:
+            return self._network_storage_result(False, error=f"DeleteNetworkStorageEntry error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="sbb", out_signature="s"
+    )
+    def SetNetworkStorageEntryFlags(self, entry_id: str, enabled: bool, auto_mount: bool) -> str:
+        """Enable/disable an entry and control whether it mounts on boot."""
+        try:
+            entries = self._load_network_storage_entries()
+            updated = None
+            for entry in entries:
+                if entry.get("id") == entry_id:
+                    entry["enabled"] = bool(enabled)
+                    entry["auto_mount"] = bool(auto_mount)
+                    updated = entry
+                    break
+            if not updated:
+                return self._network_storage_result(False, error="Network storage entry not found")
+
+            self._save_network_storage_entries(entries)
+            mounts = self._get_mounted_network_paths()
+            return self._network_storage_result(
+                True,
+                entry=self._public_network_storage_entry(updated, mounts),
+            )
+        except Exception as e:
+            return self._network_storage_result(False, error=f"SetNetworkStorageEntryFlags error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="s"
+    )
+    def MountNetworkStorageEntry(self, entry_id: str) -> str:
+        """Mount a configured network storage entry."""
+        try:
+            return self._mount_network_storage_entry(self._find_network_storage_entry(entry_id))
+        except Exception as e:
+            return self._network_storage_result(False, error=f"MountNetworkStorageEntry error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="s", out_signature="s"
+    )
+    def UnmountNetworkStorageEntry(self, entry_id: str) -> str:
+        """Unmount a configured network storage entry."""
+        try:
+            return self._unmount_network_storage_entry(self._find_network_storage_entry(entry_id))
+        except Exception as e:
+            return self._network_storage_result(False, error=f"UnmountNetworkStorageEntry error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="ssssssb", out_signature="s"
+    )
+    def MountNetworkStorage(self, protocol: str, remote: str, mount_point: str,
+                            username: str, password: str, options: str, persist: bool) -> str:
+        """Mount NFS or SMB/CIFS network storage."""
+        try:
+            import subprocess
+
+            mount_config = self._normalize_network_mount(protocol, remote, mount_point, options)
+            helper_error = self._check_network_mount_helper(mount_config["fstype"])
+            if helper_error:
+                return self._network_mount_error(helper_error)
+
+            os.makedirs(mount_config["mount_point"], exist_ok=True)
+            mount_options = self._network_mount_options(
+                mount_config["fstype"],
+                mount_config["options"],
+                mount_config["remote"],
+                username.strip(),
+                password,
+            )
+
+            result = subprocess.run(
+                [
+                    "mount",
+                    "-t", mount_config["fstype"],
+                    "-o", mount_options,
+                    mount_config["remote"],
+                    mount_config["mount_point"],
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if result.returncode != 0:
+                error = result.stderr.strip() or result.stdout.strip() or "mount command failed"
+                return self._network_mount_error(f"Network mount failed: {error}")
+
+            if persist:
+                self._update_fstab_network_mount(
+                    mount_config["remote"],
+                    mount_config["mount_point"],
+                    mount_config["fstype"],
+                    mount_options,
+                )
+
+            logger.info(f"Mounted network storage {mount_config['remote']} at {mount_config['mount_point']}")
+            return self._network_mount_success(mount_config["mount_point"])
+        except Exception as e:
+            return self._network_mount_error(f"MountNetworkStorage error: {e}")
+
+    @dbus.service.method(
+        "org.cockpit.StreamboxSettings",
+        in_signature="sb", out_signature="s"
+    )
+    def UnmountNetworkStorage(self, mount_point: str, remove_persistent: bool) -> str:
+        """Unmount network storage by mount point."""
+        try:
+            import subprocess
+
+            mount_point = self._validate_mount_point(mount_point)
+            result = subprocess.run(
+                ["umount", mount_point],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if result.returncode != 0:
+                error = result.stderr.strip() or result.stdout.strip() or "umount command failed"
+                return self._network_mount_error(f"Network unmount failed: {error}")
+
+            if remove_persistent:
+                self._remove_fstab_network_mount(mount_point)
+
+            logger.info(f"Unmounted network storage at {mount_point}")
+            return self._network_mount_success(mount_point)
+        except Exception as e:
+            return self._network_mount_error(f"UnmountNetworkStorage error: {e}")
 
     @dbus.service.method(
         "org.cockpit.StreamboxSettings",
